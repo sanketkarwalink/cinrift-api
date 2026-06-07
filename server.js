@@ -186,8 +186,8 @@ app.get("/api/proxy", async (req, res) => {
     return res.status(400).send("Invalid URL")
   }
 
-  // Forward Range header for video seeking
-  const range = req.headers.range || ""
+  // Default to first 2MB if browser doesn't send Range (avoids buffering 872MB)
+  const range = req.headers.range || "bytes=0-2097151"
   const accept = req.headers.accept || "*/*"
 
   const headers = {
@@ -226,9 +226,16 @@ app.get("/api/proxy", async (req, res) => {
     res.status(response.status)
     res.set(corsHeaders)
 
-    // Stream the response body
-    for await (const chunk of response.body) {
-      res.write(chunk)
+    // Stream the response body chunk by chunk (no buffering)
+    const reader = response.body.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        res.write(value)
+      }
+    } finally {
+      reader.releaseLock()
     }
     res.end()
   } catch (err) {
